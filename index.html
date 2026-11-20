@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Work Permit Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#12141a;--card:#1b1e26;--tx:#e8eaee;--mu:#9aa1ae;--bd:#2c303a;--red:#f87171;--redbg:#3b1717;--amb:#fbbf24;--ambbg:#3a2c0b;--grn:#4ade80;--grnbg:#12301d}
+:root[data-theme="light"]{color-scheme:light;--bg:#f6f7f9;--card:#fff;--tx:#1a1d23;--mu:#6b7280;--bd:#e3e6eb;--red:#dc2626;--redbg:#fee2e2;--amb:#b45309;--ambbg:#fef3c7;--grn:#15803d;--grnbg:#dcfce7}
+html{background:var(--bg);min-height:100%}
+*{box-sizing:border-box}
+body{min-height:100vh;margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.w{max-width:1000px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mu);margin:0 0 16px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+input,select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:9px;font:inherit}
+input{flex:1;min-width:180px}
+.alerts{display:grid;gap:8px;margin-bottom:16px}
+.al{padding:12px 14px;border-radius:10px;font-weight:500}
+.al.r{background:var(--redbg);color:var(--red)}.al.a{background:var(--ambbg);color:var(--amb)}.al.g{background:var(--grnbg);color:var(--grn)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+.st{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 14px}.st b{font-size:24px;display:block}.st span{color:var(--mu);font-size:13px}
+.tw{overflow-x:auto;background:var(--card);border:1px solid var(--bd);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--bd);white-space:nowrap}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mu)}
+tr:last-child td{border-bottom:0}
+.b{padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600}
+.b.r{background:var(--redbg);color:var(--red)}.b.a{background:var(--ambbg);color:var(--amb)}.b.g{background:var(--grnbg);color:var(--grn)}
+.btn{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:9px 14px;font:inherit;cursor:pointer}
+.btn.p{background:#2563eb;border-color:#2563eb;color:#fff}
+details{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 14px;margin-bottom:12px}
+summary{cursor:pointer;font-weight:600}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.g label{font-size:12px;color:var(--mu);display:block;margin-bottom:2px}.g input{width:100%;min-width:0}
+.msg{margin:0 0 12px;font-weight:500}.msg.e{color:var(--red)}
+.x{color:var(--red);border:0;background:none;cursor:pointer;font-size:16px}
+.note{color:var(--mu);font-size:13px;margin-top:14px}
+</style>
+</head>
+<body>
+<div class="w">
+  <h1>Work Permit Tracker</h1>
+  <p class="sub" id="today"></p>
+  <p class="msg" id="msg"></p>
+  <details id="add"><summary>+ Add permit</summary>
+    <form id="f"><div class="g">
+      <div><label>Employee name</label><input name="employee" required></div>
+      <div><label>Store</label><input name="store" required></div>
+      <div><label>Company</label><input name="company"></div>
+      <div><label>Brand</label><input name="brand"></div>
+      <div><label>Civil ID</label><input name="civil" inputmode="numeric" required></div>
+      <div><label>Start date</label><input type="date" name="start" required></div>
+      <div><label>Expiry date</label><input type="date" name="end" required></div>
+      <div style="align-self:end"><button class="btn p" style="width:100%">Save permit</button></div>
+    </div></form>
+  </details>
+  <details id="set"><summary>Settings: connect GitHub (needed to add or delete)</summary>
+    <div class="g">
+      <div><label>Repository (owner/name)</label><input id="repo" placeholder="myname/permit-tracker"></div>
+      <div><label>Access token</label><input id="tok" type="password" placeholder="github_pat_..."></div>
+      <div style="align-self:end"><button class="btn p" id="saveset" style="width:100%">Save settings</button></div>
+    </div>
+    <p class="note">Create a fine-grained token at GitHub &gt; Settings &gt; Developer settings &gt; Personal access tokens, limited to this one repository with Contents: Read and write. It is stored only in this browser.</p>
+  </details>
+  <div class="bar">
+    <input id="q" type="search" inputmode="numeric" placeholder="Search by Civil ID">
+    <button class="btn" id="theme" title="Light / dark">☀ / ☾</button>
+    <select id="sort"><option value="expiry">Sort: Soonest expiry</option><option value="store">Sort: Store name (A–Z)</option></select>
+  </div>
+  <div class="alerts" id="alerts"></div>
+  <div class="stats" id="stats"></div>
+  <div class="tw"><table><thead><tr><th>Employee</th><th>Store</th><th>Company</th><th>Brand</th><th>Civil ID</th><th>Start</th><th>Expiry</th><th>Days left</th><th>Status</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+  <p class="note">Permits are saved in permits.xlsx in your GitHub repository. WhatsApp alerts are sent automatically every morning. Version 5 (21 Nov 2026).</p>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pad=n=>String(n).padStart(2,"0"), t=new Date();
+const todayIso=t.getFullYear()+"-"+pad(t.getMonth()+1)+"-"+pad(t.getDate());
+const toIso=v=>{if(typeof v==="number")return new Date(Math.round((v-25569)*864e5)).toISOString().slice(0,10);const d=new Date(v);return isNaN(d)?"":d.toISOString().slice(0,10)};
+const days=s=>Math.round((Date.parse(s)-Date.parse(todayIso))/864e5);
+const status=n=>n<0?["Expired","r"]:n===0?["Expires today","r"]:n<=7?["Expires in "+n+" day"+(n>1?"s":""),"a"]:["Active","g"];
+let data=[],view=[];
+const HDR=["EMPLOYEE NAME","STORE","COMPANY NAME","BRAND NAME","CIVIL ID","STARTING DATE OF TEMPORARY WORK PERMIT","EXPIRATION DATE OF TEMPORARY WORK PERMIT"];
+const parseRows=buf=>{const wb=XLSX.read(buf,{type:"array"});return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""}).slice(1).filter(r=>r[0]).map(r=>({employee:String(r[0]).trim(),store:String(r[1]).trim(),company:String(r[2]).trim(),brand:String(r[3]).trim(),civil:String(r[4]).trim(),start:toIso(r[5]),end:toIso(r[6])}))};
+const cfg=()=>{try{return JSON.parse(localStorage.getItem("gh")||"{}")}catch(e){return{}}};
+const msg=(t,err)=>{$("msg").textContent=t;$("msg").className="msg"+(err?" e":"")};
+const gh=(c,opt={})=>fetch(`https://api.github.com/repos/${c.repo}/contents/permits.xlsx`,{...opt,headers:{Authorization:"Bearer "+c.token,Accept:"application/vnd.github+json","Content-Type":"application/json"}});
+async function readRepo(c){
+  const r=await gh(c);if(!r.ok)throw new Error("GitHub error "+r.status+" (check repository name and token)");
+  const j=await r.json(),bin=atob(j.content.replace(/\n/g,"")),u=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+  return{sha:j.sha,rows:parseRows(u)};
+}
+async function writeRepo(c,rows,sha,message){
+  const serial=s=>Math.round(Date.parse(s)/864e5)+25569;
+  const ws=XLSX.utils.aoa_to_sheet([HDR,...rows.map(p=>[p.employee,p.store,p.company,p.brand,String(p.civil),serial(p.start),serial(p.end)])]);
+  for(let i=1;i<=rows.length;i++)for(const col of [5,6])ws[XLSX.utils.encode_cell({r:i,c:col})].z="yyyy-mm-dd";
+  ws["!cols"]=HDR.map(()=>({wch:22}));
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Sheet1");
+  const out=new Uint8Array(XLSX.write(wb,{type:"array",bookType:"xlsx"}));
+  let bin="";for(let i=0;i<out.length;i+=8192)bin+=String.fromCharCode.apply(null,out.subarray(i,i+8192));
+  const r=await gh(c,{method:"PUT",body:JSON.stringify({message,content:btoa(bin),sha})});
+  if(!r.ok)throw new Error("Could not save (GitHub error "+r.status+"). The token needs Contents: Read and write.");
+}
+function render(){
+  $("today").textContent="Today: "+t.toDateString();
+  const all=data.map(p=>({...p,n:days(p.end)})).sort((a,b)=>a.n-b.n);
+  const q=$("q").value.trim();
+  view=all.filter(p=>p.civil.includes(q));
+  if($("sort").value==="store")view=[...view].sort((a,b)=>a.store.localeCompare(b.store)||a.n-b.n);
+  $("rows").innerHTML=view.map((p,k)=>{const[s,c]=status(p.n);return `<tr><td>${esc(p.employee)}</td><td>${esc(p.store)}</td><td>${esc(p.company)}</td><td>${esc(p.brand)}</td><td>${esc(p.civil)}</td><td>${p.start}</td><td>${p.end}</td><td>${p.n}</td><td><span class="b ${c}">${s}</span></td><td><button class="x" data-k="${k}" title="Delete">✕</button></td></tr>`}).join("")||`<tr><td colspan="10">No permits found.</td></tr>`;
+  const td=all.filter(p=>p.n===0),w=all.filter(p=>p.n>0&&p.n<=7),e=all.filter(p=>p.n<0);
+  const nm=p=>`${p.employee} – ${p.store} / ${p.brand}`;
+  let h="";
+  td.forEach(p=>h+=`<div class="al r">Expires TODAY: ${esc(nm(p))}</div>`);
+  w.forEach(p=>h+=`<div class="al a">Expires in ${p.n} day${p.n>1?"s":""} (${p.end}): ${esc(nm(p))}</div>`);
+  e.forEach(p=>h+=`<div class="al r">Expired ${-p.n} day${p.n<-1?"s":""} ago: ${esc(nm(p))}</div>`);
+  $("alerts").innerHTML=h||`<div class="al g">No permits need attention right now.</div>`;
+  $("stats").innerHTML=[["Total",all.length],["Expired / today",td.length+e.length],["Within 7 days",w.length],["Active",all.length-td.length-e.length-w.length]].map(x=>`<div class="st"><b>${x[1]}</b><span>${x[0]}</span></div>`).join("");
+}
+$("f").onsubmit=async ev=>{
+  ev.preventDefault();const c=cfg();
+  if(!c.repo||!c.token){msg("Connect GitHub first: open Settings below and save your repository and token.",1);$("set").open=true;return}
+  const p=Object.fromEntries(new FormData(ev.target));for(const k in p)p[k]=String(p[k]).trim();
+  p.civil=p.civil.replace(/\s+/g,"");
+  const dupMsg=d=>`Not saved: Civil ID ${p.civil} already exists (${d.employee}, ${d.store}, ${d.brand}, expires ${d.end}). Delete the old record first if you want to replace it.`;
+  const local=data.find(r=>r.civil===p.civil);if(local){msg(dupMsg(local),1);return}
+  try{msg("Saving…");const{sha,rows}=await readRepo(c);
+    const dup=rows.find(r=>r.civil===p.civil);if(dup){data=rows;render();msg(dupMsg(dup),1);return}
+    rows.push(p);await writeRepo(c,rows,sha,"Add permit: "+p.employee);
+    data=rows;ev.target.reset();render();msg("Saved. WhatsApp alerts will include this permit from the next daily check.")}
+  catch(err){msg(err.message,1)}
+};
+$("rows").onclick=async ev=>{
+  const k=ev.target.dataset.k;if(k===undefined)return;const p=view[+k];
+  if(!confirm("Delete permit for "+p.employee+" ("+p.civil+")?"))return;
+  const c=cfg();if(!c.repo||!c.token){msg("Connect GitHub first (Settings).",1);$("set").open=true;return}
+  try{msg("Deleting…");const{sha,rows}=await readRepo(c);
+    const i=rows.findIndex(r=>r.civil===p.civil&&r.end===p.end&&r.brand===p.brand);if(i>=0)rows.splice(i,1);
+    await writeRepo(c,rows,sha,"Delete permit: "+p.employee);data=rows;render();msg("Deleted.")}
+  catch(err){msg(err.message,1)}
+};
+$("saveset").onclick=()=>{try{localStorage.setItem("gh",JSON.stringify({repo:$("repo").value.trim(),token:$("tok").value.trim()}));msg("Settings saved in this browser.")}catch(e){msg("Could not save settings.",1)}};
+{const c=cfg();$("repo").value=c.repo||"";$("tok").value=c.token||""}
+fetch("permits.xlsx?v="+Date.now()).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer()}).then(buf=>{data=parseRows(new Uint8Array(buf));render()}).catch(()=>{$("alerts").innerHTML=`<div class="al r">Could not load permits.xlsx. Open this page from your website address, not as a local file.</div>`});
+document.querySelector('#f [name=civil]').oninput=ev=>{const v=ev.target.value.replace(/\s+/g,""),d=data.find(r=>r.civil===v);ev.target.setCustomValidity(d?"Civil ID already exists":"");if(d)msg("This Civil ID already exists: "+d.employee+", "+d.store+", "+d.brand+".",1);else if($("msg").className.includes("e"))msg("")};
+$("q").oninput=render;$("sort").onchange=render;
+{let m="dark";try{m=localStorage.getItem("theme")||"dark"}catch(e){}document.documentElement.dataset.theme=m;$("theme").onclick=()=>{m=m==="dark"?"light":"dark";document.documentElement.dataset.theme=m;try{localStorage.setItem("theme",m)}catch(e){}}}
+</script>
+</body>
+</html>
