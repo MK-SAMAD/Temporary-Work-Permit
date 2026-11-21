@@ -34,6 +34,7 @@ details{background:var(--card);border:1px solid var(--bd);border-radius:10px;pad
 summary{cursor:pointer;font-weight:600}
 .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
 .g label{font-size:12px;color:var(--mu);display:block;margin-bottom:2px}.g input{width:100%;min-width:0}
+.cm{color:var(--red);font-size:13px;font-weight:600;margin-top:3px}
 .msg{margin:0 0 12px;font-weight:500}.msg.e{color:var(--red)}
 .x{color:var(--red);border:0;background:none;cursor:pointer;font-size:16px}
 .note{color:var(--mu);font-size:13px;margin-top:14px}
@@ -44,16 +45,16 @@ summary{cursor:pointer;font-weight:600}
   <h1>Work Permit Tracker</h1>
   <p class="sub" id="today"></p>
   <p class="msg" id="msg"></p>
-  <details id="add"><summary>+ Add permit</summary>
+  <details id="add" open><summary id="addsum">+ Add worker details</summary>
     <form id="f"><div class="g">
       <div><label>Employee name</label><input name="employee" required></div>
       <div><label>Store</label><input name="store" required></div>
       <div><label>Company</label><input name="company"></div>
       <div><label>Brand</label><input name="brand"></div>
-      <div><label>Civil ID</label><input name="civil" inputmode="numeric" required></div>
+      <div><label>Civil ID (12 digits)</label><input name="civil" inputmode="numeric" placeholder="12 digits" autocomplete="off" required><div class="cm" id="civmsg"></div></div>
       <div><label>Start date</label><input type="date" name="start" required></div>
       <div><label>Expiry date</label><input type="date" name="end" required></div>
-      <div style="align-self:end"><button class="btn p" style="width:100%">Save permit</button></div>
+      <div style="align-self:end;display:flex;gap:8px"><button class="btn p" id="savebtn" style="flex:1">Save worker</button><button type="button" class="btn" id="cancel" hidden>Cancel</button></div>
     </div></form>
   </details>
   <details id="set"><summary>Settings: connect GitHub (needed to add or delete)</summary>
@@ -72,7 +73,7 @@ summary{cursor:pointer;font-weight:600}
   <div class="alerts" id="alerts"></div>
   <div class="stats" id="stats"></div>
   <div class="tw"><table><thead><tr><th>Employee</th><th>Store</th><th>Company</th><th>Brand</th><th>Civil ID</th><th>Start</th><th>Expiry</th><th>Days left</th><th>Status</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
-  <p class="note">Permits are saved in permits.xlsx in your GitHub repository. WhatsApp alerts are sent automatically every morning. Version 5 (21 Nov 2026).</p>
+  <p class="note">Permits are saved in permits.xlsx in your GitHub repository. WhatsApp alerts are sent automatically every morning.</p>
 </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -85,11 +86,13 @@ const status=n=>n<0?["Expired","r"]:n===0?["Expires today","r"]:n<=7?["Expires i
 let data=[],view=[];
 const HDR=["EMPLOYEE NAME","STORE","COMPANY NAME","BRAND NAME","CIVIL ID","STARTING DATE OF TEMPORARY WORK PERMIT","EXPIRATION DATE OF TEMPORARY WORK PERMIT"];
 const parseRows=buf=>{const wb=XLSX.read(buf,{type:"array"});return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""}).slice(1).filter(r=>r[0]).map(r=>({employee:String(r[0]).trim(),store:String(r[1]).trim(),company:String(r[2]).trim(),brand:String(r[3]).trim(),civil:String(r[4]).trim(),start:toIso(r[5]),end:toIso(r[6])}))};
+const civilCheck=v=>!/^\d*$/.test(v)?"Civil ID must contain digits only.":v.length!==12?"You need to enter 12 digits. You entered "+v.length+".":"";
 const cfg=()=>{try{return JSON.parse(localStorage.getItem("gh")||"{}")}catch(e){return{}}};
 const msg=(t,err)=>{$("msg").textContent=t;$("msg").className="msg"+(err?" e":"")};
 const gh=(c,opt={})=>fetch(`https://api.github.com/repos/${c.repo}/contents/permits.xlsx`,{...opt,headers:{Authorization:"Bearer "+c.token,Accept:"application/vnd.github+json","Content-Type":"application/json"}});
+const ghErr=n=>n===401?"The token is wrong or expired. Create a new token and save it in Settings.":n===403?"The token has no permission. Set Contents to Read and write for this repository.":n===404?"Repository or permits.xlsx not found. Check the name (yourname/permit-tracker), that the token has this repository selected, and that permits.xlsx is uploaded.":n===409||n===422?"The file changed at the same time. Try again.":"GitHub error "+n+".";
 async function readRepo(c){
-  const r=await gh(c);if(!r.ok)throw new Error("GitHub error "+r.status+" (check repository name and token)");
+  const r=await gh(c);if(!r.ok)throw new Error(ghErr(r.status));
   const j=await r.json(),bin=atob(j.content.replace(/\n/g,"")),u=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
   return{sha:j.sha,rows:parseRows(u)};
@@ -103,7 +106,7 @@ async function writeRepo(c,rows,sha,message){
   const out=new Uint8Array(XLSX.write(wb,{type:"array",bookType:"xlsx"}));
   let bin="";for(let i=0;i<out.length;i+=8192)bin+=String.fromCharCode.apply(null,out.subarray(i,i+8192));
   const r=await gh(c,{method:"PUT",body:JSON.stringify({message,content:btoa(bin),sha})});
-  if(!r.ok)throw new Error("Could not save (GitHub error "+r.status+"). The token needs Contents: Read and write.");
+  if(!r.ok)throw new Error(ghErr(r.status));
 }
 function render(){
   $("today").textContent="Today: "+t.toDateString();
@@ -111,7 +114,7 @@ function render(){
   const q=$("q").value.trim();
   view=all.filter(p=>p.civil.includes(q));
   if($("sort").value==="store")view=[...view].sort((a,b)=>a.store.localeCompare(b.store)||a.n-b.n);
-  $("rows").innerHTML=view.map((p,k)=>{const[s,c]=status(p.n);return `<tr><td>${esc(p.employee)}</td><td>${esc(p.store)}</td><td>${esc(p.company)}</td><td>${esc(p.brand)}</td><td>${esc(p.civil)}</td><td>${p.start}</td><td>${p.end}</td><td>${p.n}</td><td><span class="b ${c}">${s}</span></td><td><button class="x" data-k="${k}" title="Delete">✕</button></td></tr>`}).join("")||`<tr><td colspan="10">No permits found.</td></tr>`;
+  $("rows").innerHTML=view.map((p,k)=>{const[s,c]=status(p.n);return `<tr><td>${esc(p.employee)}</td><td>${esc(p.store)}</td><td>${esc(p.company)}</td><td>${esc(p.brand)}</td><td>${esc(p.civil)}</td><td>${p.start}</td><td>${p.end}</td><td>${p.n}</td><td><span class="b ${c}">${s}</span></td><td><button class="x" style="color:var(--mu)" data-a="edit" data-k="${k}" title="Edit">✎</button><button class="x" data-a="del" data-k="${k}" title="Delete">✕</button></td></tr>`}).join("")||`<tr><td colspan="10">No permits found.</td></tr>`;
   const td=all.filter(p=>p.n===0),w=all.filter(p=>p.n>0&&p.n<=7),e=all.filter(p=>p.n<0);
   const nm=p=>`${p.employee} – ${p.store} / ${p.brand}`;
   let h="";
@@ -121,21 +124,30 @@ function render(){
   $("alerts").innerHTML=h||`<div class="al g">No permits need attention right now.</div>`;
   $("stats").innerHTML=[["Total",all.length],["Expired / today",td.length+e.length],["Within 7 days",w.length],["Active",all.length-td.length-e.length-w.length]].map(x=>`<div class="st"><b>${x[1]}</b><span>${x[0]}</span></div>`).join("");
 }
+let editing=null;
+function setMode(on){$("addsum").textContent=on?"Edit worker details":"+ Add worker details";$("savebtn").textContent=on?"Update worker":"Save worker";$("cancel").hidden=!on}
+function startEdit(p){editing=p.civil;const f=$("f");for(const k of ["employee","store","company","brand","civil","start","end"])f.elements[k].value=p[k]||"";$("civmsg").textContent="";setMode(true);$("add").open=true;f.scrollIntoView({behavior:"smooth",block:"center"});msg("Editing "+p.employee+". Change the details, then press Update worker.")}
+$("cancel").onclick=()=>{editing=null;$("f").reset();$("civmsg").textContent="";setMode(false);msg("")};
 $("f").onsubmit=async ev=>{
   ev.preventDefault();const c=cfg();
-  if(!c.repo||!c.token){msg("Connect GitHub first: open Settings below and save your repository and token.",1);$("set").open=true;return}
   const p=Object.fromEntries(new FormData(ev.target));for(const k in p)p[k]=String(p[k]).trim();
   p.civil=p.civil.replace(/\s+/g,"");
+  const ce=civilCheck(p.civil);if(ce){$("civmsg").textContent=ce;msg(ce,1);return}
+  if(p.end<p.start){msg("The expiry date must be after the start date.",1);return}
+  if(!c.repo||!c.token){msg("Connect GitHub first: open Settings below and save your repository and token.",1);$("set").open=true;return}
   const dupMsg=d=>`Not saved: Civil ID ${p.civil} already exists (${d.employee}, ${d.store}, ${d.brand}, expires ${d.end}). Delete the old record first if you want to replace it.`;
-  const local=data.find(r=>r.civil===p.civil);if(local){msg(dupMsg(local),1);return}
+  const local=data.find(r=>r.civil===p.civil&&r.civil!==editing);if(local){msg(dupMsg(local),1);return}
   try{msg("Saving…");const{sha,rows}=await readRepo(c);
-    const dup=rows.find(r=>r.civil===p.civil);if(dup){data=rows;render();msg(dupMsg(dup),1);return}
-    rows.push(p);await writeRepo(c,rows,sha,"Add permit: "+p.employee);
-    data=rows;ev.target.reset();render();msg("Saved. WhatsApp alerts will include this permit from the next daily check.")}
+    const dup=rows.find(r=>r.civil===p.civil&&r.civil!==editing);if(dup){data=rows;render();msg(dupMsg(dup),1);return}
+    if(editing){const i=rows.findIndex(r=>r.civil===editing);if(i<0){msg("That worker was not found in the file. It may have been deleted.",1);return}rows[i]=p}else rows.push(p);
+    await writeRepo(c,rows,sha,(editing?"Edit permit: ":"Add permit: ")+p.employee);
+    const was=editing;editing=null;setMode(false);
+    data=rows;ev.target.reset();render();msg(was?"Updated. WhatsApp alerts will use the new details.":"Saved. WhatsApp alerts will include this permit from the next daily check.")}
   catch(err){msg(err.message,1)}
 };
 $("rows").onclick=async ev=>{
-  const k=ev.target.dataset.k;if(k===undefined)return;const p=view[+k];
+  const b=ev.target.closest("button"),k=b&&b.dataset.k;if(k===undefined)return;const p=view[+k];
+  if(b.dataset.a==="edit"){startEdit(p);return}
   if(!confirm("Delete permit for "+p.employee+" ("+p.civil+")?"))return;
   const c=cfg();if(!c.repo||!c.token){msg("Connect GitHub first (Settings).",1);$("set").open=true;return}
   try{msg("Deleting…");const{sha,rows}=await readRepo(c);
@@ -143,10 +155,22 @@ $("rows").onclick=async ev=>{
     await writeRepo(c,rows,sha,"Delete permit: "+p.employee);data=rows;render();msg("Deleted.")}
   catch(err){msg(err.message,1)}
 };
-$("saveset").onclick=()=>{try{localStorage.setItem("gh",JSON.stringify({repo:$("repo").value.trim(),token:$("tok").value.trim()}));msg("Settings saved in this browser.")}catch(e){msg("Could not save settings.",1)}};
+$("saveset").onclick=()=>{try{localStorage.setItem("gh",JSON.stringify({repo:$("repo").value.trim().replace(/^https?:\/\/github\.com\//,"").replace(/\.git$/,"").replace(/\/+$/,""),token:$("tok").value.replace(/\s+/g,"")}));msg("Settings saved in this browser.")}catch(e){msg("Could not save settings.",1)}};
 {const c=cfg();$("repo").value=c.repo||"";$("tok").value=c.token||""}
-fetch("permits.xlsx?v="+Date.now()).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer()}).then(buf=>{data=parseRows(new Uint8Array(buf));render()}).catch(()=>{$("alerts").innerHTML=`<div class="al r">Could not load permits.xlsx. Open this page from your website address, not as a local file.</div>`});
-document.querySelector('#f [name=civil]').oninput=ev=>{const v=ev.target.value.replace(/\s+/g,""),d=data.find(r=>r.civil===v);ev.target.setCustomValidity(d?"Civil ID already exists":"");if(d)msg("This Civil ID already exists: "+d.employee+", "+d.store+", "+d.brand+".",1);else if($("msg").className.includes("e"))msg("")};
+let FURL="permits.xlsx";try{FURL=new URL("permits.xlsx",location.href).href}catch(e){}
+fetch("permits.xlsx?v="+Date.now()).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.arrayBuffer()}).then(buf=>{data=parseRows(new Uint8Array(buf));render()}).catch(e=>{
+  let m;
+  if(location.protocol==="file:")m="You opened the file from your computer. Open your website address instead: https://yourname.github.io/permit-tracker/";
+  else if(typeof XLSX==="undefined")m="The Excel reader did not load. Check your internet connection or ad blocker, then refresh.";
+  else if(/HTTP 404/.test(e.message))m="permits.xlsx was not found at "+FURL+" . Upload permits.xlsx (exactly this name, small letters) in the same folder as index.html.";
+  else m="permits.xlsx could not be read ("+e.message+"). Upload the original permits.xlsx again.";
+  $("alerts").innerHTML=`<div class="al r">${esc(m)}</div>`});
+document.querySelector('#f [name=civil]').oninput=ev=>{
+  const v=ev.target.value.replace(/\s+/g,""),d=data.find(r=>r.civil===v&&r.civil!==editing);
+  const bad=!/^\d*$/.test(v)||v.length>12;
+  $("civmsg").textContent=bad?civilCheck(v):"";
+  if(bad)msg(civilCheck(v),1);else if(d)msg("This Civil ID already exists: "+d.employee+", "+d.store+", "+d.brand+".",1);else if($("msg").className.includes("e"))msg("");
+};
 $("q").oninput=render;$("sort").onchange=render;
 {let m="dark";try{m=localStorage.getItem("theme")||"dark"}catch(e){}document.documentElement.dataset.theme=m;$("theme").onclick=()=>{m=m==="dark"?"light":"dark";document.documentElement.dataset.theme=m;try{localStorage.setItem("theme",m)}catch(e){}}}
 </script>
